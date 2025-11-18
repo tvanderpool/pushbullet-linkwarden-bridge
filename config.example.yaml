@@ -1,0 +1,37 @@
+# Linkwarden API Configuration
+linkwarden:
+  # Your Linkwarden instance URL (without trailing slash)
+  api_url: "https://your-linkwarden-instance.com"
+  # API token from Linkwarden settings
+  api_token: "your-linkwarden-api-token"
+
+# Pushbullet API Configuration
+pushbullet:
+  # API token from Pushbullet settings
+  api_token: "your-pushbullet-api-token"
+
+# Channel mappings between Pushbullet devices and Linkwarden collections
+channels:
+  # Example channel configuration
+  - name: "My Phone"  # Pushbullet device nickname
+    collection: "Personal Links"  # Linkwarden collection name
+    collection_id: null  # Will be auto-filled on first run
+    device_iden: null  # Will be auto-filled on first run
+
+  # Add more channels as needed
+  - name: "Work Computer"
+    collection: "Work Resources"
+    collection_id: null
+    device_iden: null
+
+# Application settings (optional)
+settings:
+  # Enable dry-run mode (don't actually create links in Linkwarden)
+  dry_run: false
+  # Log level: DEBUG, INFO, WARNING, ERROR
+  log_level: "INFO"
+  # Reconnection settings
+  reconnect_max_delay: 300  # Maximum delay in seconds between reconnection attempts
+  reconnect_initial_delay: 2  # Initial delay in seconds
+  # API request timeout in seconds
+  request_timeout: 30
