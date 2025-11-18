@@ -393,11 +393,9 @@ class PushbulletLinkwardenBridge:
             return
 
         # Resolve URL redirects (particularly for search.app URLs)
-        resolved_url, extracted_title = self._resolve_url(url)
+        resolved_url = self._resolve_url(url)
 
-        # Use extracted title if no title was provided in the push
-        if extracted_title and not title:
-            title = extracted_title
+        title = self._extract_page_title(resolved_url) or title
 
         # Save to Linkwarden with resolved URL
         self.save_to_linkwarden(resolved_url, title, body, collection_id, device_iden)
@@ -474,14 +472,13 @@ class PushbulletLinkwardenBridge:
             self.logger.warning(f"Failed to extract title from {url}: {e}")
             return None
 
-    def _resolve_url(self, url: str) -> Tuple[str, Optional[str]]:
+    def _resolve_url(self, url: str) -> str:
         """
         Resolve URL redirects, particularly for search.app URLs.
-        Returns a tuple of (resolved_url, extracted_title)
         """
         if not url.startswith('https://search.app/'):
             # Not a search.app URL, return as-is
-            return url, None
+            return url
 
         self.logger.info(f"Resolving search.app URL: {url}")
 
@@ -510,18 +507,15 @@ class PushbulletLinkwardenBridge:
                 resolved_url = response.headers.get('location')
                 if resolved_url:
                     self.logger.info(f"Resolved {url} -> {resolved_url}")
-
-                    # Extract title from the resolved URL
-                    title = self._extract_page_title(resolved_url)
-                    return resolved_url, title
+                    return resolved_url
 
             # If no redirect found, return original URL
             self.logger.warning(f"No redirect found for {url} (status: {response.status_code})")
-            return url, None
+            return url
 
         except Exception as e:
             self.logger.error(f"Failed to resolve URL {url}: {e}")
-            return url, None
+            return url
 
     def process_initial_pushes(self) -> None:
         """Process pushes since last run for tracked devices"""
