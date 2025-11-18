@@ -11,10 +11,11 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import requests
 import websocket
+from bs4 import BeautifulSoup
 from ruamel.yaml import YAML
 
 # Constants
@@ -22,6 +23,7 @@ PUSHBULLET_WS_URL = "wss://stream.pushbullet.com/websocket/{token}"
 PUSHBULLET_API_BASE = "https://api.pushbullet.com/v2"
 PROCESSED_PUSHES_FILE = "processed_pushes.json"
 CONFIG_FILE = "config.yaml"
+FIREFOX_USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64; rv:133.0) Gecko/20100101 Firefox/133.0"
 
 
 @dataclass
@@ -390,8 +392,15 @@ class PushbulletLinkwardenBridge:
             self.logger.warning(f"Push {push_iden} has no URL, skipping")
             return
 
-        # Save to Linkwarden
-        self.save_to_linkwarden(url, title, body, collection_id, device_iden)
+        # Resolve URL redirects (particularly for search.app URLs)
+        resolved_url, extracted_title = self._resolve_url(url)
+
+        # Use extracted title if no title was provided in the push
+        if extracted_title and not title:
+            title = extracted_title
+
+        # Save to Linkwarden with resolved URL
+        self.save_to_linkwarden(resolved_url, title, body, collection_id, device_iden)
 
         # Update processed pushes
         self.processed_pushes[device_iden] = push_modified
@@ -439,6 +448,80 @@ class PushbulletLinkwardenBridge:
             if channel.get('collection_id') == collection_id:
                 return channel.get('collection', str(collection_id))
         return str(collection_id)
+
+    def _extract_page_title(self, url: str) -> Optional[str]:
+        """Extract page title from URL using beautifulsoup4"""
+        try:
+            headers = {'User-Agent': FIREFOX_USER_AGENT}
+            response = requests.get(
+                url,
+                headers=headers,
+                timeout=self.settings.request_timeout,
+                allow_redirects=True
+            )
+            response.raise_for_status()
+
+            soup = BeautifulSoup(response.content, 'html.parser')
+            title_tag = soup.find('title')
+
+            if title_tag and title_tag.string:
+                title = title_tag.string.strip()
+                self.logger.debug(f"Extracted title from {url}: {title}")
+                return title
+
+            return None
+        except Exception as e:
+            self.logger.warning(f"Failed to extract title from {url}: {e}")
+            return None
+
+    def _resolve_url(self, url: str) -> Tuple[str, Optional[str]]:
+        """
+        Resolve URL redirects, particularly for search.app URLs.
+        Returns a tuple of (resolved_url, extracted_title)
+        """
+        if not url.startswith('https://search.app/'):
+            # Not a search.app URL, return as-is
+            return url, None
+
+        self.logger.info(f"Resolving search.app URL: {url}")
+
+        try:
+            headers = {'User-Agent': FIREFOX_USER_AGENT}
+
+            # Try HEAD request first to get the redirect location
+            response = requests.head(
+                url,
+                headers=headers,
+                timeout=self.settings.request_timeout,
+                allow_redirects=False
+            )
+
+            # If HEAD fails with 403, try GET instead (some services block HEAD)
+            if response.status_code == 403:
+                self.logger.debug("HEAD request returned 403, trying GET instead")
+                response = requests.get(
+                    url,
+                    headers=headers,
+                    timeout=self.settings.request_timeout,
+                    allow_redirects=False
+                )
+
+            if response.status_code in (301, 302, 303, 307, 308):
+                resolved_url = response.headers.get('location')
+                if resolved_url:
+                    self.logger.info(f"Resolved {url} -> {resolved_url}")
+
+                    # Extract title from the resolved URL
+                    title = self._extract_page_title(resolved_url)
+                    return resolved_url, title
+
+            # If no redirect found, return original URL
+            self.logger.warning(f"No redirect found for {url} (status: {response.status_code})")
+            return url, None
+
+        except Exception as e:
+            self.logger.error(f"Failed to resolve URL {url}: {e}")
+            return url, None
 
     def process_initial_pushes(self) -> None:
         """Process pushes since last run for tracked devices"""
